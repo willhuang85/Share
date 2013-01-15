@@ -1,0 +1,29 @@
+#scoopit-post-class .inside{
+	margin:0;
+}
+
+.share_select_topic{
+	padding-top:10px;
+}
+
+.share_select_topic select{
+	width:100%;
+}
+
+.share_sharers_list ul{
+	list-style-type:none;
+}
+
+.share_sharers_list ul li input{
+	vertical-align:middle;
+}
+
+.share_sharers_list ul li label{
+	display:inline-block;
+	vertical-align:middle;
+	padding-left: 0.3em;
+}
+
+.share_sharers_list ul li label img{
+	vertical-align:middle;
+}
