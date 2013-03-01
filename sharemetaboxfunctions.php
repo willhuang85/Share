@@ -52,7 +52,7 @@ function share_publish() {
 	$url = get_permalink(get_the_ID());
 	$shareOnText = custom_excerpt($content);
 	
-	$topic = $share_database->getTopic();
+	$topicId = $share_database->getTopic();
 	$sharers = $share_database->getSharers();
 	if (!empty($sharers))
 		$sharers = unserialize($sharers);
@@ -64,7 +64,7 @@ function share_publish() {
 	if (!empty($topic)) {
 		$share_scoopit = new Sharescoopit($consumerkey,$consumersecret,$accesstokenvalue,$accesstokensecret);
 		// $share_scoopit->testToken();
-		$share_scoopit->publish($title, $content, $shareOnText, $topic, $sharers);
+		$share_scoopit->publish($title, $content, $shareOnText, $topicId, $sharers);
 		// 		$share_database->setTopic('');
 		// 		$share_database->setSharers('');
 	}

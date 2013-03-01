@@ -2,7 +2,7 @@
 /*
  * oauth_client.php
  *
- * @(#) $Id: oauth_client.php,v 1.46 2013/01/10 10:11:33 mlemos Exp $
+ * @(#) $Id: oauth_client.php,v 1.49 2013/02/20 11:44:29 mlemos Exp $
  *
  */
 
@@ -12,7 +12,7 @@
 
 	<package>net.manuellemos.oauth</package>
 
-	<version>@(#) $Id: oauth_client.php,v 1.46 2013/01/10 10:11:33 mlemos Exp $</version>
+	<version>@(#) $Id: oauth_client.php,v 1.49 2013/02/20 11:44:29 mlemos Exp $</version>
 	<copyright>Copyright © (C) Manuel Lemos 2012</copyright>
 	<title>OAuth client</title>
 	<author>Manuel Lemos</author>
@@ -224,6 +224,7 @@ class oauth_client_class
 				Currently it supports the following servers:
 				<stringvalue>Bitbucket</stringvalue>,
 				<stringvalue>Dropbox</stringvalue>,
+				<stringvalue>Eventful</stringvalue>,
 				<stringvalue>Facebook</stringvalue>,
 				<stringvalue>Fitbit</stringvalue>,
 				<stringvalue>Flickr</stringvalue>,
@@ -234,6 +235,7 @@ class oauth_client_class
 				<stringvalue>LinkedIn</stringvalue>,
 				<stringvalue>Microsoft</stringvalue>,
 				<stringvalue>Scoop.it</stringvalue>,
+				<stringvalue>StockTwits</stringvalue>,
 				<stringvalue>Tumblr</stringvalue>,
 				<stringvalue>Twitter</stringvalue> and
 				<stringvalue>Yahoo</stringvalue>. Please contact the author if you
@@ -392,6 +394,24 @@ class oauth_client_class
 {/metadocument}
 */
 	var $authorization_header = true;
+
+/*
+{metadocument}
+	<variable>
+		<name>token_request_method</name>
+		<type>STRING</type>
+		<value>GET</value>
+		<documentation>
+			<purpose>Define the HTTP method that should be used to request
+				tokens from the server.</purpose>
+			<usage>Set this variable to <stringvalue>POST</stringvalue> if the
+				OAuth server does not support requesting tokens using the HTTP GET
+				method.</usage>
+		</documentation>
+	</variable>
+{/metadocument}
+*/
+	var $token_request_method = 'GET';
 
 /*
 {metadocument}
@@ -585,7 +605,7 @@ class oauth_client_class
 */
 	var $response_status = 0;
 
-	var $oauth_user_agent = 'PHP-OAuth-API (http://www.phpclasses.org/oauth-api $Revision: 1.46 $)';
+	var $oauth_user_agent = 'PHP-OAuth-API (http://www.phpclasses.org/oauth-api $Revision: 1.49 $)';
 	var $session_started = false;
 
 	Function SetError($error)
@@ -878,7 +898,7 @@ class oauth_client_class
 		$http->user_agent = $this->oauth_user_agent;
 		if($this->debug)
 			$this->OutputDebug('Accessing the '.$options['Resource'].' at '.$url);
-		$arguments = array();
+		$post_files = array();
 		$method = strtoupper($method);
 		$authorization = '';
 		$type = (IsSet($options['RequestContentType']) ? strtolower(trim(strtok($options['RequestContentType'], ';'))) : 'application/x-www-form-urlencoded');
@@ -891,16 +911,58 @@ class oauth_client_class
 				'oauth_timestamp'=>time(),
 				'oauth_version'=>'1.0',
 			);
-			if($this->url_parameters
-			&& $type === 'application/x-www-form-urlencoded'
-			&& count($parameters))
+			$files = (IsSet($options['Files']) ? $options['Files'] : array());
+			if(count($files))
 			{
-				$first = (strpos($url, '?') === false);
-				foreach($parameters as $parameter => $value)
-					$url .= ($first ? '?' : '&').UrlEncode($parameter).'='.UrlEncode($value);
-				$parameters = array();
+				foreach($files as $name => $value)
+				{
+					if(!IsSet($parameters[$name]))
+						return($this->SetError('it was specified an file parameters named '.$name));
+					$file = array();
+					switch(IsSet($value['Type']) ? $value['Type'] : 'FileName')
+					{
+						case 'FileName':
+							$file['FileName'] = $parameters[$name];
+							break;
+						case 'Data':
+							$file['Data'] = $parameters[$name];
+							break;
+						default:
+							return($this->SetError($value['Type'].' is not a valid type for file '.$name));
+					}
+					$file['ContentType'] = (IsSet($value['Content-Type']) ? $value['Content-Type'] : 'automatic/name');
+					$post_files[$name] = $file;
+				}
+				UnSet($parameters[$name]);
+				if($method !== 'POST')
+				{
+					$this->OutputDebug('For uploading files the method should be POST not '.$method);
+					$method = 'POST';
+				}
+				if($type !== 'multipart/form-data')
+				{
+					if(IsSet($options['RequestContentType']))
+						return($this->SetError('the request content type for uploading files should be multipart/form-data'));
+					$type = 'multipart/form-data';
+				}
+				$value_parameters = array();
 			}
-			$value_parameters = ($type !== 'application/x-www-form-urlencoded' ? array() : $parameters);
+			else
+			{
+				if($this->url_parameters
+				&& $type === 'application/x-www-form-urlencoded'
+				&& count($parameters))
+				{
+					$first = (strpos($url, '?') === false);
+					foreach($parameters as $parameter => $value)
+					{
+						$url .= ($first ? '?' : '&').UrlEncode($parameter).'='.UrlEncode($value);
+						$first = false;
+					}
+					$parameters = array();
+				}
+				$value_parameters = ($type !== 'application/x-www-form-urlencoded' ? array() : $parameters);
+			}
 			$values = array_merge($values, $oauth, $value_parameters);
 			$uri = strtok($url, '?');
 			$sign = $method.'&'.$this->Encode($uri).'&';
@@ -933,7 +995,9 @@ class oauth_client_class
 			}
 			else
 			{
-				if($method === 'GET')
+				if($method === 'GET'
+				|| (IsSet($options['PostValuesInURI'])
+				&& $options['PostValuesInURI']))
 				{
 					$first = (strcspn($url, '?') == strlen($url));
 					foreach($values as $parameter => $value)
@@ -951,10 +1015,13 @@ class oauth_client_class
 			return($this->SetError('it was not possible to open the '.$options['Resource'].' URL: '.$error));
 		if(strlen($error = $http->Open($arguments)))
 			return($this->SetError('it was not possible to open the '.$options['Resource'].' URL: '.$error));
+		if(count($post_files))
+			$arguments['PostFiles'] = $post_files;
 		$arguments['RequestMethod'] = $method;
 		switch($type)
 		{
 			case 'application/x-www-form-urlencoded':
+			case 'multipart/form-data':
 				if(IsSet($options['RequestBody']))
 					return($this->SetError('the request body is defined automatically from the parameters'));
 				$arguments['PostValues'] = $parameters;
@@ -1098,10 +1165,11 @@ class oauth_client_class
 				<purpose>Associative array with additional options to configure
 					the request. Currently it supports the following
 					options:<paragraphbreak />
-					<stringvalue>Resource</stringvalue>: string with a label that
-						will be used in the error messages and debug log entries to
-						identify what operation the request is performing. The default
-						value is <stringvalue>API call</stringvalue>.<paragraphbreak />
+					<stringvalue>Accept</stringvalue>: content type value of the
+						Accept HTTP header to be sent in the API call HTTP request.
+						Some APIs require that a certain value be sent to specify
+						which version of the API is being called. The default value is
+						<stringvalue>*&#47;*</stringvalue>.<paragraphbreak />
 					<stringvalue>ConvertObjects</stringvalue>: boolean option that
 						determines if objects should be converted into arrays when the
 						response is returned in JSON format. The default value is
@@ -1110,11 +1178,26 @@ class oauth_client_class
 						that determines if this functions should fail when the server
 						response status is not between 200 and 299. The default value
 						is <booleanvalue>0</booleanvalue>.<paragraphbreak />
-					<stringvalue>Accept</stringvalue>: content type value of the
-						Accept HTTP header to be sent in the API call HTTP request.
-						Some APIs require that a certain value be sent to specify
-						which version of the API is being called. The default value is
-						<stringvalue>*&#47;*</stringvalue>.<paragraphbreak />
+					<stringvalue>Files</stringvalue>: associative array with
+						details of the parameters that must be passed as file uploads.
+						The array indexes must have the same name of the parameters
+						to be sent as files. The respective array entry values must
+						also be associative arrays with the parameters for each file.
+						Currently it supports the following parameters:<paragraphbreak />
+						- <tt>Type</tt> - defines how the parameter value should be
+						treated. It can be <tt>'FileName'</tt> if the parameter value is
+						is the name of a local file to be uploaded. It may also be
+						<tt>'Data'</tt> if the parameter value is the actual data of
+						the file to be uploaded.<paragraphbreak />
+						- Default: <tt>'FileName'</tt><paragraphbreak />
+						- <tt>ContentType</tt> - MIME value of the content type of the
+						file. It can be <tt>'automatic/name'</tt> if the content type
+						should be determine from the file name extension.<paragraphbreak />
+						- Default: <tt>'automatic/name'</tt><paragraphbreak />
+					<stringvalue>PostValuesInURI</stringvalue>: boolean option to
+						determine that a POST request should pass the request values
+						in the URI. The default value is
+						<booleanvalue>0</booleanvalue>.<paragraphbreak />
 					<stringvalue>RequestContentType</stringvalue>: content type that
 						should be used to send the request values. It can be either
 						<stringvalue>application/x-www-form-urlencoded</stringvalue>
@@ -1127,7 +1210,11 @@ class oauth_client_class
 					<stringvalue>RequestBody</stringvalue>: request body data of a
 						custom type. The <stringvalue>RequestContentType</stringvalue>
 						option must be specified, so the
-						<stringvalue>RequestBody</stringvalue> option is considered.</purpose>
+						<stringvalue>RequestBody</stringvalue> option is considered.<paragraphbreak />
+					<stringvalue>Resource</stringvalue>: string with a label that
+						will be used in the error messages and debug log entries to
+						identify what operation the request is performing. The default
+						value is <stringvalue>API call</stringvalue>.</purpose>
 			</documentation>
 		</argument>
 		<argument>
@@ -1212,6 +1299,7 @@ class oauth_client_class
 				$this->access_token_url = 'https://bitbucket.org/!api/1.0/oauth/access_token';
 				$this->authorization_header = true;
 				$this->url_parameters = true;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Dropbox':
@@ -1222,6 +1310,18 @@ class oauth_client_class
 				$this->access_token_url = 'https://api.dropbox.com/1/oauth/access_token';
 				$this->authorization_header = false;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
+				break;
+
+			case 'Eventful':
+				$this->oauth_version = '1.0a';
+				$this->request_token_url = 'http://eventful.com/oauth/request_token';
+				$this->dialog_url = 'http://eventful.com/oauth/authorize';
+				$this->append_state_to_redirect_uri = '';
+				$this->access_token_url = 'http://eventful.com/oauth/access_token';
+				$this->authorization_header = false;
+				$this->url_parameters = true;
+				$this->token_request_method = 'POST';
 				break;
 
 			case 'Facebook':
@@ -1232,6 +1332,7 @@ class oauth_client_class
 				$this->access_token_url = 'https://graph.facebook.com/oauth/access_token';
 				$this->authorization_header = true;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Fitbit':
@@ -1242,6 +1343,7 @@ class oauth_client_class
 				$this->access_token_url = 'http://api.fitbit.com/oauth/access_token';
 				$this->authorization_header = true;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Flickr':
@@ -1252,6 +1354,7 @@ class oauth_client_class
 				$this->access_token_url = 'http://www.flickr.com/services/oauth/access_token';
 				$this->authorization_header = false;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Foursquare':
@@ -1262,6 +1365,7 @@ class oauth_client_class
 				$this->access_token_url = 'https://foursquare.com/oauth2/access_token';
 				$this->authorization_header = true;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'github':
@@ -1272,6 +1376,7 @@ class oauth_client_class
 				$this->access_token_url = 'https://github.com/login/oauth/access_token';
 				$this->authorization_header = true;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Google':
@@ -1282,6 +1387,7 @@ class oauth_client_class
 				$this->access_token_url = 'https://accounts.google.com/o/oauth2/token';
 				$this->authorization_header = true;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Instagram':
@@ -1292,6 +1398,7 @@ class oauth_client_class
 				$this->access_token_url = 'https://api.instagram.com/oauth/access_token';
 				$this->authorization_header = true;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'LinkedIn':
@@ -1302,6 +1409,7 @@ class oauth_client_class
 				$this->append_state_to_redirect_uri = '';
 				$this->authorization_header = true;
 				$this->url_parameters = true;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Microsoft':
@@ -1312,6 +1420,7 @@ class oauth_client_class
 				$this->access_token_url = 'https://login.live.com/oauth20_token.srf';
 				$this->authorization_header = true;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Scoop.it':
@@ -1322,6 +1431,18 @@ class oauth_client_class
 				$this->access_token_url = 'https://www.scoop.it/oauth/access';
 				$this->authorization_header = false;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
+				break;
+
+			case 'StockTwits':
+				$this->oauth_version = '2.0';
+				$this->request_token_url = '';
+				$this->dialog_url = 'https://api.stocktwits.com/api/2/oauth/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&scope={SCOPE}&state={STATE}';
+				$this->append_state_to_redirect_uri = '';
+				$this->access_token_url = 'https://api.stocktwits.com/api/2/oauth/token';
+				$this->authorization_header = true;
+				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Tumblr':
@@ -1332,6 +1453,7 @@ class oauth_client_class
 				$this->access_token_url = 'http://www.tumblr.com/oauth/access_token';
 				$this->authorization_header = true;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Twitter':
@@ -1342,6 +1464,7 @@ class oauth_client_class
 				$this->access_token_url = 'https://api.twitter.com/oauth/access_token';
 				$this->authorization_header = true;
 				$this->url_parameters = true;
+				$this->token_request_method = 'GET';
 				break;
 
 			case 'Yahoo':
@@ -1352,6 +1475,7 @@ class oauth_client_class
 				$this->append_state_to_redirect_uri = '';
 				$this->authorization_header = false;
 				$this->url_parameters = false;
+				$this->token_request_method = 'GET';
 				break;
 
 			default:
@@ -1447,7 +1571,20 @@ class oauth_client_class
 							if($one_a)
 								$oauth['oauth_verifier'] = $verifier;
 							$this->access_token_secret = $access_token['secret'];
-							if(!$this->SendAPIRequest($url, 'GET', array(), $oauth, array('Resource'=>'OAuth access token'), $response))
+							$options = array('Resource'=>'OAuth access token');
+							$method = strtoupper($this->token_request_method);
+							switch($method)
+							{
+								case 'GET':
+									break;
+								case 'POST':
+									$options['PostValuesInURI'] = true;
+									break;
+								default:
+									$this->error = $method.' is not a supported method to request tokens';
+									break;
+							}
+							if(!$this->SendAPIRequest($url, $method, array(), $oauth, $options, $response))
 								return false;
 							if(strlen($this->access_token_error))
 							{
@@ -1513,7 +1650,20 @@ class oauth_client_class
 					$oauth = array(
 						'oauth_callback'=>$redirect_uri,
 					);
-					if(!$this->SendAPIRequest($url, 'GET', array(), $oauth, array('Resource'=>'OAuth request token'), $response))
+					$options = array('Resource'=>'OAuth request token');
+					$method = strtoupper($this->token_request_method);
+					switch($method)
+					{
+						case 'GET':
+							break;
+						case 'POST':
+							$options['PostValuesInURI'] = true;
+							break;
+						default:
+							$this->error = $method.' is not a supported method to request tokens';
+							break;
+					}
+					if(!$this->SendAPIRequest($url, $method, array(), $oauth, $options, $response))
 						return false;
 					if(strlen($this->access_token_error))
 					{
